@@ -1,0 +1,892 @@
+---
+title: "Data analysis with R (PUHR11103) - Assignment"
+author: "B248593"
+output:
+  pdf_document: default
+  word_document: default
+bibliography: ../meta_data/references.bib
+csl: ../meta_data/harvard.csl
+editor_options:
+  markdown:
+    wrap: 80
+---
+
+# Word count: 2473 words
+
+\newpage
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+debug_var = TRUE # Set to `FALSE` to NOT show code chunks (for word counting)
+knitr::opts_chunk$set(
+  echo = debug_var,
+  warning = FALSE,
+  error = FALSE,
+  message = FALSE
+)
+```
+
+# Data input
+
+First the needed libraries are load into R / Rstudio with the `p_load` 
+method found within the `pacman` package (installed previously), which installs 
+packages first if they are not already installed. The Assignment instructions
+paper is loaded, as it contains the codebook section, which is needed to 
+understand the dataset struture.
+
+The data is accessable through the Learn portal of the University of Edingburgh.
+The dataset itself is named after a town in Massachusetts USA, which was founded
+in the 17th century [@Framingham_Founding] and had a population of around 72,000 
+people by 2020 with a median age of 39.1 years. Most of them have a health 
+insurance, only 5,3% of the population are uninsured [@Framingham_Data]. The city 
+is located on the east coast of the US, and is part of the Greater Boston area and 
+surrounded by some lakes as the map shows.
+
+![Framingham, Massachusetts (Source: MapGeo)](../meta_data/Framingham_City_Map.png)
+
+To open the dataset `framingham_2024.csv` for import into RStudio it is read 
+from the `raw_data` directory using the `pacman::p_load` method which installs 
+a missing package if it is missing.
+
+<!--
+To avoid absolute paths with user names included, the `here` package is used to 
+access resources relatively from the working directory.
+-->
+
+```{r input, echo = TRUE, message = FALSE, include = debug_var, results = 'hide'}
+library(pacman)
+pacman::p_load(tidyverse, ggplot2, epitools, finalfit, broom, gt, here)
+
+# Opening assessment instructions with Codebook section
+browseURL(here("meta_data", "Assignment_instructions_2024.pdf"))
+
+# Printing out questions / answers about the assignment
+readLines(here("meta_data", "Questions.txt"))
+
+# Listing files in `raw_data` directory
+list.files("./raw_data/")
+
+# Importing the dataset
+framingham <- read_csv(here("raw_data", "framingham_2024.csv"))
+```
+
+The [age distribution of the population (Link: Data Census)](https://data.census.gov/vizwidget?g=160XX00US2524960&infoSection=Age%20and%20Sex)
+of Framingham shows not a pyramid shape, as the two largest age groups are in the
+35 - 39 and 40 - 44 for men and 30 - 34 and 35 - 39 for women. @Framingham_Study
+describes the used data from the Framingham Heart Study (FHS). They state, it 
+contains people from 3 different generations (original participants, children of
+them and their grandchildren). The study started in 1948 and is still ongoing and
+shows risk factors for coronary heart disease (CHD).
+
+# Data checking
+
+The data set has a total of observations (rows) `r nrow(framingham)` and 
+`r ncol(framingham)` variables (columns). As the `str`
+method shows, all variables are stored as numerical values of the type `double`.
+
+```{r check, echo = TRUE, message = FALSE, include = debug_var, results = FALSE}
+# Checking the dataset
+View(framingham)
+dim(framingham)
+str(framingham)
+
+# Showing total columns count
+ncol(framingham)
+
+# Showing total rows count
+nrow(framingham)
+
+# Showing columns with missing values
+missing <- colSums(is.na(framingham))
+
+# Just showing columns with missing values
+col_missing <- missing[missing > 0]
+
+# Writing column names with value in brackets
+col_missing_names <- paste0(names(col_missing), " (", col_missing, ")")
+col_comma_separated <- paste(col_missing_names, collapse = ", ")
+```
+
+Reading the codebook section of the assignment instructions, the following
+variables are included in the dataset:
+
+- **sex** -> *Sex*: **1 = male, 2 = female**
+- **age** -> *Age* of the participant at exam (**years**)
+- **currentSmoker** *Current smoker*: **1 = Yes, 0 = No**
+- **cigsPerDay** -> *Number* of cigarettes that the respondent smoked on average in one day
+- **BPMeds** -> Use of *Anti-hypertensive medication* at exam: **1 = Yes, 0 = No**
+- **prevalentStroke** -> Respondent had a *stroke* previously: **1 = Yes, 0 = No**
+- **prevalentHyp** -> *Prevalent Hypertensive*. Subject was defined as hypertensive if 
+treated or if second exam at which mean systolic was >=140 mmHg or mean 
+Diastolic >=90 mmHg: **1 = Yes, 0 = No**
+- **diabetes** -> Diabetic according to criteria of first exam treated or first exam 
+with casual glucose of 200 mg/dL or more: **1 = Yes, 0 = No**
+- **totChol** -> *Serum total cholesterol* level (**mg/dL**)
+- **sysBP** -> *Systolic blood pressure* (mean of last two of three measurements) (**mm Hg**)
+- **diaBP** -> *Diastolic blood pressure* (mean of last two of three measurements) (**mm Hg**)
+- **BMI** -> *BMI* (**kg/m^2**) 
+- **heartRate** -> *Heart rate* (Ventricular rate) (**BPM**)
+- **glucose** -> *Casual serum glucose* level (**mg/dL**)
+- **anyCHD** -> *Outcome: Occurrence of any Coronary Heart Disease* (Angina Pectoris, 
+Myocardial infarction (Hospitalized and silent or unrecognized), Coronary 
+Insufficiency (Unstable Angina), or Fatal Coronary Heart Disease: **1 = Yes, 0 = No**
+
+The columns (variables) `r col_comma_separated` show missing values, the amount 
+of missing values are listed in the brackets.
+
+# Data preparation
+
+As the codebook section in the instruction paper mentioned the raw data needs to
+be recoded. The variables `sex`, `currentSmoker`, `BPMeds`, `prevalentHyp`, 
+`diabetes` and `anyCHD` are transformed to factors. The levels of the `sex` 
+variable are changed to `male` and `female`, the levels of all other variables
+are changed to `No` and `Yes`. 
+
+```{r prepare, echo = TRUE, include = debug_var}
+# Transforming 7 categorical variables into factors
+framingham_df <- framingham %>%
+  mutate(
+    sex = factor(sex, labels = c("male", "female")),
+    currentSmoker = factor(currentSmoker, labels = c("No", "Yes")),
+    BPMeds = factor(BPMeds, labels = c("No", "Yes")),
+    prevalentStroke = factor(prevalentStroke, labels = c("No", "Yes")),
+    prevalentHyp = factor(prevalentHyp, labels = c("No", "Yes")),
+    diabetes = factor(diabetes, labels = c("No", "Yes")),
+    anyCHD = factor(anyCHD, labels = c("No", "Yes"))
+  )
+
+# Viewing the dataframe
+View(framingham_df)
+
+# Cleaining up the environment
+rm(framingham, missing, col_missing, col_missing_names)
+```
+
+No further processing is needed. The processed data is stored in the variable 
+`framingham_df`.
+
+# Exploratory Data Analysis
+
+## 1.
+### a. 
+First I created a contingency table to see the distribution of the `anyCHD`
+variable. The distribution of the dependent variable (anyCHD) is shown in the
+left column of the table. The smoking status (currentSmoker), which is the
+independent variable, is shown in the top row of the table. The table shows the 
+number of participants in each combination of the two variables.
+
+A barplot will be used to visualize the distribution of the `currentSmoker`
+variable in relation to the occurrence of any Coronary Heart Disease as it 
+displays the frequency distribution of this categorical variable.
+
+```{r explore_1_a, echo = TRUE, include = debug_var}
+# Contingency table
+framingham_df %>%
+  select(anyCHD, currentSmoker) %>%
+  table()
+```
+
+Both groups (smoking and non smoking) are nearly the same size.
+
+### b. 
+To observe the relationship of age (2 categories) and anyCHD are shown in a 
+contingency table. The occurence is shown by column of the age (numerical) 
+where the first row shows the not existing CHD, the second exisiting CHD.
+
+A barplot will be used to visualize the distribution of the `currentSmoker`
+variable in relation to the occurrence of any Coronary Heart Disease as it 
+displays the frequency distribution of this categorical variable.
+
+```{r explore_1_b, echo = TRUE, message = FALSE, include = debug_var, results = FALSE}
+# Creating crosstab
+crosstab_age <- framingham_df %>%
+  select(age, anyCHD)
+
+# Contingency table
+crosstab_age %>%
+  table()
+
+# Viewing crosstab
+View(crosstab_age)
+```
+
+```{r explore_1_b2, echo = TRUE, message = TRUE, include = debug_var}
+# Range of age
+crosstab_age %>%
+  select(age) %>%
+  range()
+
+# Mean and Median of the age variable
+crosstab_age %>%
+  summarise(
+    age.mean = mean(age),
+    age.median = median(age)
+  )
+
+# Summarising of age in relation to anyCHD
+crosstab_age %>%
+  summary_factorlist(
+    dependent = "anyCHD", explanatory = "age",
+    column = FALSE, total_col = TRUE
+  )
+```
+
+The summarisation shows that the mean age of individuals with any coronary heart 
+disease is 52.7, which is higher than the mean age of individuals without any 
+coronary heart disease (48.9). This suggests that individuals with any coronary 
+heart disease are generally older than those without any coronary heart disease.
+
+```{r explore_1_b3, echo = TRUE, include = debug_var}
+# Recoding age into 2 level factor (40-59, 60-79)
+crosstab_age_cat <- framingham_df %>%
+  filter(age >= 40) %>%
+  mutate(age_cat = cut(age,
+    breaks = c(39, 59, 79),
+    labels = c("40-59", "60-79")
+  )) %>%
+  select(anyCHD, age_cat)
+
+# Contingency table
+crosstab_age_cat %>%
+  table()
+
+# Viewing crosstab
+View(crosstab_age_cat)
+```
+
+That created the `crosstab_age_cat` table containing the age in two category
+groups.
+
+## 2.
+### a. 
+Checking the data for a relation of systolic blood pressure (sysBP) and
+smoking.
+
+```{r explore_2_a, echo = TRUE, message = FALSE, include = debug_var, results = FALSE}
+# Creating crosstab
+crosstab_sysBP <- framingham_df %>%
+  select(currentSmoker, sysBP)
+
+# Contingency table
+crosstab_sysBP %>%
+  table()
+
+# Viewing crosstab
+View(crosstab_sysBP)
+```
+
+```{r explore_2_a2, echo = TRUE, message = TRUE, include = debug_var}
+# Range of sysBP
+crosstab_sysBP %>%
+  select(sysBP) %>%
+  range()
+
+# Mean and Median of the sysBP variable
+crosstab_sysBP %>%
+  select(sysBP) %>%
+  summarise(
+    sysBP.mean = mean(sysBP),
+    sysBP.median = median(sysBP)
+  )
+
+# Summarising of smoking status in relation to sysBP
+crosstab_sysBP %>%
+  summary_factorlist(
+    dependent = "sysBP", explanatory = "currentSmoker",
+    column = FALSE, total_col = TRUE
+  )
+```
+
+The range of the systolic blood pressure is between 83 and 295 mm Hg. The mean
+133 mm Hg, and the median 129 mm Hg. For smokers the mean is 130 mm Hg and for 
+non-smokers 136 mm Hg.
+
+### b.
+
+Investigating relations between prevalence of Hypertension and smoking.
+
+```{r explore_2_b, echo = TRUE, message = FALSE, include = debug_var, results = FALSE}
+# Creating crosstab
+crosstab_preHyp <- framingham_df %>%
+  select(currentSmoker, prevalentHyp)
+
+# Contingency table
+crosstab_preHyp %>%
+  table()
+
+# Viewing crosstab
+View(crosstab_preHyp)
+```
+
+```{r explore_2_b2, echo = TRUE, message = TRUE, include = debug_var}
+# Summarising of smoking status in relation to sysBP
+crosstab_preHyp %>%
+  summary_factorlist(
+    dependent = "prevalentHyp", explanatory = "currentSmoker",
+    column = FALSE, total_col = TRUE
+  )
+```
+
+The summary statistics show that the prevalence of hypertension is higher in
+people who do not smoke (37.2%) than in those who do (27.1%).
+
+## 3.
+As an automated approach to create the tables which is utilized, and no manual
+data checking was conducted, the `drop_na` method is used to remove missing
+values from the dataset.
+
+# Developing the analysis plan
+
+## 1. 
+### a. 
+I plan to answer the question about the risk of heart disease with a riskratio 
+test. The null hypothesis is that the risk of heart disease (binary outcome of 
+"Yes" or "No") is the same for smokers and non-smokers, which is a binary / 
+categorical variable. The alternative hypothesis is that the risk of heart
+disease is different for smokers and non-smokers. I will use a significance level
+of 0.05.
+
+### b. 
+For answering the question of association of CHD and age a wilcox test will be
+used. The null hypothesis is that the risk of heart disease is not dependent on age.
+Therefore the alternative hypothesis is it appears differently with changing age 
+groups. Again a significance level of 0.05 will be used.
+
+## 2.
+### a.
+In this case several tests will be used. The null hypothesis is that the mean
+systolic blood pressure is the same for smokers and non-smokers. The alternative
+hypothesis is that the mean systolic blood pressure is different for smokers and
+non-smokers. A significance level of 0.05 is used.
+
+### b.
+A Fisher excat test will be used to compare the prevalence of hypertension between
+smokers and non-smokers. The null hypothesis is that the prevalence of hypertension
+is the same for smokers and non-smokers. The alternative hypothesis is that the 
+prevalence of hypertension is different for smokers and non-smokers. The same 
+significance level as for the other analyses is used (0.05).
+
+### 3
+As the amount of data categories is complex, a automated approach was chosen to
+create the tables which shows associations with a significance level of 0.01. The
+null hypothesis is always that the risk factor is not associated with the 
+occurrence of CHD. The alternative hypothesis is that it is.
+
+# Investigating the assumptions
+
+## 1.
+### a. 
+In this case, the assumption of normal distribution is not relevant, as it is 
+the distribution of a discrete variable. The riskratio test will be used.
+
+```{r assumptions_1_a, echo = TRUE, include = debug_var}
+# Checking assumption
+subset_framingham <- framingham_df %>%
+  drop_na(currentSmoker) %>%
+  sample_n(1000)
+
+# Distribution of currentSmoker
+p0 <- subset_framingham %>%
+  ggplot(aes(x = currentSmoker)) +
+  geom_bar(aes(y = ..prop.., fill = anyCHD)) +
+  labs(title = "Figure A1: Current Smoker",
+       subtitle = "in relation to the occurrence of any Coronary Heart Disease",
+       x = "Current Smoker", y = "Proportion",
+       caption = "Data source: Framingham Heart Study")
+p0
+
+# Saving the plot
+ggsave(p0, file = here("figures/", "Plot_A1.png"))
+
+# Cleaning up the environment
+rm(subset_framingham)
+```
+
+### b. 
+The assumption of normal distribution for age will be tested with a histogram
+and a Shapiro-Wilk test.
+
+```{r assumptions_1_b, echo = TRUE, include = debug_var}
+# Creating sample dataset
+subset_age <-
+  crosstab_age %>%
+  drop_na(age) %>%
+  sample_n(1000)
+
+# Checking distribution of age (also for normality)
+p1 <- subset_age %>%
+  ggplot(aes(x = age)) +
+  geom_histogram(aes(y = after_stat(density))) +
+  geom_density(aes(y = after_stat(density))) + 
+  labs(title = "Figure A2: Age",
+       subtitle = "Distribution",
+       x = "Age", y = "Density",
+       caption = "Data source: Framingham Heart Study")
+p1
+
+# Saving the plot
+ggsave(p1, file = here("figures/", "Plot_A2.png"))
+
+# Shapiro-Wilk test
+subset_age %>%
+  pull(age) %>%
+  shapiro.test()
+
+# Showing histogram with of age in relation to `anyCHD`
+p2 <- subset_age %>%
+  ggplot(aes(x = age)) +
+  geom_histogram(aes(y = after_stat(count), fill = ..density..), bins = 20) +
+  labs(title = "Figure A3: Age distribution",
+       subtitle = "in relation to the occurrence of any coronary heart disease",
+       x = "Age", y = "Count",
+       caption = "Data source: Framingham Heart Study") +
+  facet_grid(rows = vars(anyCHD))
+p2
+
+# Saving the plot
+ggsave(p2, file = here("figures/", "Plot_A3.png"))
+```
+
+Trusting the appearance of the histograms, showing rise on the left of the graph,
+and the Shapiro-Wilk test with a p-value of less than 0.05, we assume that the age 
+variable is not normally distributed. Considering that, the use of parametric tests 
+like t-tests is not recommended.
+
+```{r assumptions_1_b2, echo = TRUE, include = debug_var}
+# Checking age_cat
+p3 <- crosstab_age_cat %>%
+  mutate(anyCHD = fct_rev(anyCHD)) %>%
+  ggplot(aes(x = age_cat, fill = anyCHD)) +
+  geom_bar(position = "fill") +
+  labs(title = "Figure A4: Age categories",
+       subtitle = "in relation to the occurrence of any coronary heart disease",
+       x = "Age category", y = "Proportion",
+       caption = "Data source: Framingham Heart Study") +
+  theme_minimal()
+p3
+
+# Saving the plot
+ggsave(p3, file = here("figures/", "Plot_A4.png"))
+```
+
+The barplot shows that the proportion of individuals with any coronary heart or
+without in the two age categories. It is showing that the proportion of individuals 
+with CHD is higher in the 60-79 age category than in the 40-59 age category.
+
+## 2.
+### a.
+The assumption of normal distribution for systolic blood pressure will be tested.
+
+```{r assumptions_2_a, echo = TRUE, include = debug_var}
+# Creating sampple dataset
+subset_sysBP <- crosstab_sysBP %>%
+  drop_na(sysBP) %>%
+  sample_n(1000)
+
+# Checking distribution of sysBP (also for normality)
+p4 <- subset_sysBP %>%
+  ggplot(aes(x = sysBP)) +
+  geom_histogram(aes(y = after_stat(density))) +
+  geom_density(aes(y = after_stat(density))) +
+  labs(title = "Figure A5: systolic blood pressure",
+       subtitle = "Distribution in relation to smoking status",
+       x = "Systolic blood pressure (mm Hg)", y = "Denstity",
+       caption = "Data source: Framingham Heart Study") +
+  facet_grid(rows = vars(currentSmoker))
+p4
+
+# Saving the plot
+ggsave(p4, file = here("figures/", "Plot_A5.png"))
+
+# Performing Shapiro-Wilk test
+subset_sysBP %>%
+  pull(sysBP) %>%
+  shapiro.test()
+```
+
+The p-value is very small, suggesting that the systolic blood pressure variable 
+is not normally distributed. This means that we cannot use a parametric test 
+like the t-test.
+ 
+### b.
+
+Here the assumption of normal distribution is not relevant, as it is 
+the distribution of a discrete variable. The Fisher excat test will be used.
+
+```{r assumptions_2_b, echo = TRUE, include = debug_var}
+# Checking distribution of prevalentHyp
+p5 <- crosstab_preHyp %>%
+  mutate(prevalentHyp = fct_rev(prevalentHyp)) %>%
+  ggplot(aes(x = currentSmoker, fill = prevalentHyp)) +
+  geom_bar(position = "fill") +
+  labs(title = "Figure A6: Prevalence of hypertension",
+       subtitle = "in relation to smoking status",
+       x = "Smoking status", y = "Proportion",
+       caption = "Data source: Framingham Heart Study") +
+  theme_minimal()
+p5
+
+# Save the plot
+ggsave(p5, file = here("figures/", "Plot_A6.png"))
+```
+
+## 3.
+The assumption of normal distribution for continuous variables is tested 
+through the Shapiro-Wilk test. The assumption of normal distribution for
+categorical variables is not relevant.
+
+# Carry out the analysis
+
+## 1.
+### a. 
+The riskratio test is used to compare the risk of heart disease between
+smokers and non-smokers. The test is performed using the `epitab` function from
+the `epitools` package. The result is a risk ratio and a 95% confidence interval.
+
+```{r analysis_1_a, echo = TRUE, include = debug_var}
+# Calculating relative risk
+framingham_df %>%
+  select(currentSmoker, anyCHD) %>%
+  table() %>%
+  epitab(., method = "riskratio", rev = "columns")
+```
+
+### b. 
+The Wilcoxon rank sum test is used to compare the median age of individuals
+with and without any coronary heart disease. Also the t-.test is used to compare
+the mean age that were calculated before.
+
+```{r analysis_1_b, echo = TRUE, include = debug_var}
+# Performing t-test (is this parametric test valid?
+# as age is NOT normally distributed!!!)
+crosstab_age %>%
+  t.test(age ~ anyCHD, data = .)
+
+# Performing wilcox-test (non-parametric test, as age is NOT normally distributed)
+# age in relation to anyCHD
+crosstab_age %>%
+  wilcox.test(age ~ anyCHD, data = ., conf.int = TRUE)
+
+# Cleaning up the environment
+rm(crosstab_age)
+```
+
+Now the riskratio is calculated for the two age categories (40 - 59 and 60 - 79),
+as the oddsratio.
+
+```{r analysis_1_b2, echo = TRUE, include = debug_var}
+# Relative risk
+crosstab_age_cat %>%
+  mutate(age_cat = fct_relevel(age_cat, "60-79")) %>%
+  table() %>%
+  epitab(., method = "riskratio", rev = "columns")
+
+# Odds ratios
+crosstab_age_cat %>%
+  mutate(age_cat = fct_relevel(age_cat, "60-79")) %>%
+  table() %>%
+  epitab(., method = "oddsratio", rev = "columns")
+
+# Cleaning up the environment
+rm(crosstab_age, crosstab_age_cat, subset_age)
+```
+
+## 2.
+### a.
+Several tests are conducted. First the Chi-square test is used. As the distribution
+of the systolic blood pressure is not normally distributed, the Wilcoxon rank sum
+was used to confirm these results. Finally the linear regression is used to 
+verify the outcome.
+
+```{r analysis_2_a, echo = TRUE, include = debug_var}
+# Performing Chi-squared test
+crosstab_sysBP %>%
+  table() %>%
+  chisq.test()
+
+# Performing Wilcoxon rank sum test (non-parametric test,
+# as `sysBP` is NOT normally distributed)
+crosstab_sysBP %>%
+  wilcox.test(sysBP ~ currentSmoker, data = ., conf.int = TRUE)
+
+# Lineare Regression
+crosstab_sysBP %>%
+  lm(sysBP ~ currentSmoker, data = .) %>%
+  summary()
+
+# Cleaning up the environment
+rm(crosstab_sysBP, subset_sysBP)
+```
+
+### b.
+
+The Fisher exact test is used to compare the prevalence of hypertension between
+smokers and non-smokers.
+
+```{r analysis_2_b, echo = TRUE, include = debug_var}
+# Performing Fisher exact test
+crosstab_preHyp %>%
+  table() %>%
+  fisher.test()
+
+# Cleaning up the environment
+rm(crosstab_preHyp)
+```
+
+## 3.
+
+The automated approach is used to create the tables which shows associations with
+a significance level of 0.01.
+
+```{r analysis_3, echo = TRUE, include = debug_var}
+# Looping through the risk factors with Chi-square test
+# total cholesterol, smoking status, agecategory, systolic blood pressure,
+# BMI, and prevalence of hypertension
+risk_factors <- list("totChol", "currentSmoker", "age_cat", "sysBP", "BMI",
+                     "prevalentHyp")
+
+# Creating empty list to store results
+significance_tb <- list()
+
+# Looping through the risk factors
+for (risk_factor in risk_factors) {
+  # Looping through both sexes and both gender
+  for (sex_var in list("female", "male", c("female", "male"))) {
+    # Creating crosstab for each risk factor
+    crosstab <- framingham_df %>%
+      mutate(age_cat = cut(age,
+        breaks = c(39, 59, 79),
+        labels = c("40-59", "60-79")
+      )) %>%
+      drop_na(all_of(risk_factor)) %>%
+      select(sex, all_of(risk_factor), anyCHD)
+
+    # Setting Chi-square test for categorical variables
+    if (class(crosstab[[risk_factor]]) == "factor") {
+      test_type <- "chisq.test"
+    }
+
+    # Tests for continuous variables
+    else { # nolint
+      # Testing for normal distribution
+      norm_dist <- crosstab %>%
+        pull(all_of(risk_factor)) %>%
+        shapiro.test()
+
+      # T-test for continuous variables normally distributed
+      if (norm_dist$p.value > 0.01) {
+        test_type <- "t.test"
+      }
+
+      # Wilcoxon test for continuous variables, not normally distributed
+      else { # nolint
+        test_type <- "wilcox.test"
+      }
+    }
+
+    # Performing the test
+    result <- suppressWarnings({
+      crosstab %>%
+        filter(sex %in% sex_var) %>%
+        select(anyCHD, all_of(risk_factor)) %>%
+        table() %>%
+        get(test_type)()
+    })
+
+    # Cleaning up the environment
+    rm(crosstab)
+
+    # Outputting the result
+    cat(paste0("Risk factor: ", risk_factor, ", Gender: ",
+               paste(sex_var, collapse = " & ")))
+
+    # Setting significance level to 0.01
+    if (result$p.value < 0.01) {
+      significance_tb <- append(significance_tb, list(c(risk_factor,
+                                  paste(sex_var, collapse = " & "), "Yes"
+                                )))
+      cat(" -> Significant risk to attain a heart disease (", test_type, ")\n")
+    } else {
+      significance_tb <- append(significance_tb, list(c(risk_factor,
+                                  paste(sex_var, collapse = " & "), "No"
+                                )))
+      cat(" -> No significant risk to attain a heart disease()", test_type, ")\n")
+    }
+  }
+}
+
+# Cleaning up the environment
+rm(framingham_df, risk_factors, risk_factor, sex_var, test_type, result)
+
+# Viewing the list
+View(significance_tb)
+
+# Transforming the list into a dataframe
+significance_tb_df <- significance_tb %>%
+  as.data.frame()
+
+# Giving the columns numbers (1, 2, 3 etc.)
+colnames(significance_tb_df) <- c(1 : length(significance_tb_df)) # nolint
+
+# Giving the rows names
+rownames(significance_tb_df) <- c("RiskFactor", "Sex", "Significant")
+
+# Viewing the dataframe
+View(significance_tb_df)
+
+# Transforming the dataframe into tibble
+significance_tb_tidied <- significance_tb_df %>%
+  t() %>%
+  as_tibble()
+
+# Viewing the tibble
+View(significance_tb_tidied)
+
+# Creating table A1
+t1 <- significance_tb_tidied %>%
+  group_by(Significant) %>%
+  mutate(Group = Significant) %>%
+  gt() %>%
+  tab_header(title = "Table A1: Risk factors",
+             subtitle = "in relation to occurrence of coronary heart disease") %>%
+  tab_source_note(source_note = md("*Data source: Framingham Heart Study*")) %>%
+  cols_hide(columns = Group) %>%
+  cols_label(Group = md("*Significance*"), RiskFactor = md("**Risk Factor**"),
+             Sex = md("**Gender**")) %>%
+  cols_move(columns = c(RiskFactor, Sex), after = Group) %>%
+  cols_align(align = "left", columns = everything()) %>%
+  tab_spanner(label = md("*grouped by Significance*"), columns = RiskFactor) %>%
+  tab_style(
+    style = list(cell_fill(color = "#bd5c5c")),
+    locations = cells_body(rows = Significant == "Yes")
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = "#4b8b4b")),
+    locations = cells_body(rows = Significant == "No")
+  )
+t1
+gtsave(t1, filename = "Table_A1.pdf", path = here("tables/"))
+
+# Creating table A2
+t2 <- significance_tb_tidied %>%
+  group_by(Sex) %>%
+  mutate(Group = Sex) %>%
+  gt() %>%
+  tab_header(title = "Table A2: Risk factors",
+             subtitle = "in relation to occurrence of coronary heart disease") %>%
+  tab_source_note(source_note = md("*Data source: Framingham Heart Study*")) %>%
+  cols_hide(columns = Group) %>%
+  cols_label(Significant = md("**Significance**"), RiskFactor = md("**Risk Factor**")) %>%
+  cols_move(columns = c(RiskFactor, Sex), after = Group) %>%
+  cols_align(align = "left", columns = everything()) %>%
+  tab_spanner(label = md("*grouped by Gender*"), columns = Significant) %>%
+  tab_style(
+    style = cell_fill(color = "#bd5c5c"),
+    locations = cells_body(rows = Significant == "Yes")
+  ) %>%
+  tab_style(
+    style = cell_fill(color = "#4b8b4b"),
+    locations = cells_body(rows = Significant == "No")
+  )
+t2
+gtsave(t2, filename = "Table_A2.pdf", path = here("tables/"))
+
+# Cleaning up the environment
+rm(significance_tb, significance_tb_df, significance_tb_tidied, t1, t2)
+```
+
+# Interpretation
+
+## 1.
+### a. 
+The relative risk of occurrence of any coronary heart disease given the smoking
+attribute show a slightly decreases risk factor if the individual is a smoker.
+With a lower and upper confidence interval of 0.955 and 1.028, which includes 1,
+there is no significant difference in the risk of occurrence of any coronary heart.
+Also the p-value of 0.64 is greater than 0.05, suggesting no significant
+relationship between the variables. This was already expected by the contingency
+table and the barplot which didn't show any differences in both groups.
+
+### b. 
+The Wilcoxon rank sum test results show a significant difference in the median
+age of individuals with and without any coronary heart disease. With a small p-value 
+less than 0.05, we see a significant difference in the median age
+of individuals with and without any coronary heart disease. The confidence
+interval of -5 and -3 (0 not included) further supports this conclusion, as there 
+seems to be a difference of around 4 years that persons with the disease are older,
+than these without the disease. After that the relative risk for the two age
+categories was calculated. Here a significant increase by 74,26% in the risk for 
+the 60-79 age category can be seen. With a lower and upper confidence
+interval of 1.54 and 1.97, which does not include 1, there is a
+significant difference in the risk of occurrence of any coronary heart. Also the
+p-value is less than 0.05, suggesting a significant relationship.
+The odds ratio of occurrence of any coronary heart disease given the age category
+attribute indicates an increase in the chance by two if the individual is in
+the 60-79 age category. With a lower and upper confidence interval of 1.74
+and 2.4 (which not included), there is a significant difference in
+opportunity of the occurrence of any coronary heart. Significance is expected 
+with a p-value of less than 0.05.
+
+## 2.
+### a.
+The p-value of 0.007 is less than 0.05, suggesting a significant relationship
+between the variables through the Chi-squared test. That means it can be concluded 
+that the mean systolic  blood pressure of individuals who are smokers and those 
+who are not is significantly different. 
+As of non normal distribution of the systolic blood pressure, 
+the Wilcoxon rank sum test was used to confirm these results. It produced a 
+pmuch smaller p-value, giving a stronger proof of a significant difference. 
+The confidence interval of 4 and 6.5 further supports this conclusion, as this
+range is not including 0 and is narrow. There seems to be a difference of 
+5 mmHg, meaning that non-smokers have a 5 mm Hg higher systolic blood pressure 
+than non-smokers.
+The linear regression result show a significant difference in the mean systolic
+blood pressure of individuals who are smokers and those who are not. With a very 
+small p-value, there is significance. The coefficient of -6 further supports 
+this conclusion, as it indicates that smokers have a lower systolic blood pressure 
+by 6 mmHg.
+
+### b.
+The p-value is less than 0.05, suggesting a significant relationship
+between the variables. This means that the odds of having hypertension are
+significantly different between individuals who smoke and those who do not.
+The odds ratio of 0.63 indicates that the odds of having hypertension are
+37% lower for individuals who smoke compared to those who do not smoke. The
+95% confidence interval of 0.55 and 0.71 further supports this
+conclusion, as it does not include 1, indicating a significant difference.
+
+## 3.
+Smoking is surprisingly not a significant risk factor for the occurrence of any 
+coronary heart disease for male persons of the Framingham Heart Study. All other 
+risk factors show a significant impact on the risk of attaining any coronary heart
+disease.
+
+# Conclusion
+
+Smoking is not a significant risk factor for the occurrence of any coronary heart.
+That is unexpected as the literature suggests that smoking is a significant risk
+for diffrent diseases like coronary heart disease [@Smoking_CDC].
+
+On the other hand, the Framingham Heart Study data shows significant impact of
+all other variables on the risk of attaining any coronary heart disease.
+
+\newpage
+
+# References {.unnumbered}
+
+::: {#refs}
+:::
+
+\newpage
+
+**Session Info**
+
+Debug variable and output of used libraries.
+
+```{r code_final, echo = TRUE, include = debug_var}
+# Knitted with RStudio (2023.09.1+494 "Desert Sunflower" for macOS)
+# For word counting the code and it's output will be neglected, 
+# setting the `debug_var` variable to `TRUE`.
+sessionInfo()
+```
+

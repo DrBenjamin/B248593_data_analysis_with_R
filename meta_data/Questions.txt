@@ -1,0 +1,16 @@
+Questions:
+
+Assumptions:
+- each test will have a specific assumption
+- if these are not met you cannot trust the test
+- described
+- results
+
+Exploraty part:
+- - summary table
+- - contigency tables
+- relevant plotsa / tables
+- before I do the test I choose the variables
+
+Findings:
+ - t.test
